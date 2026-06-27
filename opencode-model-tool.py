@@ -97,6 +97,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip confirmation prompt before writing config.",
     )
+    p.add_argument(
+        "--no-limits",
+        action="store_true",
+        help="Skip adding context/output limits to model configs.",
+    )
     return p.parse_args()
 
 
@@ -365,12 +370,12 @@ def build_model_config(
     default_output: int = DEFAULT_OUTPUT_TOKENS,
     api_context: int | None = None,
     api_output: int | None = None,
+    no_limits: bool = False,
 ) -> dict:
-    """Build an OpenCode model config entry from a model ID.
+    """Build an OpenCode model config entry from a model ID."""
+    if no_limits:
+        return {"name": model_id}
 
-    Context priority: api_context > name parsing > DEFAULT_CONTEXT_FALLBACK.
-    Output priority: api_output > default_output, capped to context.
-    """
     context = api_context or parse_context_from_id(model_id) or DEFAULT_CONTEXT_FALLBACK
     output = min(api_output or default_output, context)
     return {
@@ -582,10 +587,13 @@ def format_models_json(models: dict, indent: int = 8) -> str:
         name_s = json.dumps(config["name"])
         lines.append(f"{' ' * indent}{mid_s}: {{")
         lines.append(f'{" " * (indent + 2)}"name": {name_s},')
-        lines.append(f'{" " * (indent + 2)}"limit": {{')
-        lines.append(f'{" " * (indent + 4)}"context": {config["limit"]["context"]},')
-        lines.append(f'{" " * (indent + 4)}"output": {config["limit"]["output"]}')
-        lines.append(f"{' ' * (indent + 2)}}}")
+        if "limit" in config:
+            lines.append(f'{" " * (indent + 2)}"limit": {{')
+            lines.append(f'{" " * (indent + 4)}"context": {config["limit"]["context"]},')
+            lines.append(f'{" " * (indent + 4)}"output": {config["limit"]["output"]}')
+            lines.append(f"{' ' * (indent + 2)}}},")
+        else:
+            lines[-1] = lines[-1].rstrip(",")
         lines.append(f"{' ' * indent}}},")
     lines.append(f"{' ' * (indent - 2)}}}")
     return "\n".join(lines)
@@ -686,13 +694,15 @@ def update_config_models(
     if adding:
         print(f"\n  Adding {len(adding)} model(s):")
         for mid in adding:
-            ctx = models[mid]["limit"]["context"]
-            print(f"    + {mid} (context: {ctx:,})")
+            ctx = models[mid].get("limit", {}).get("context") if models[mid].get("limit") else None
+            ctx_str = f" (context: {ctx:,})" if ctx else ""
+            print(f"    + {mid}{ctx_str}")
     if keeping:
         print(f"\n  Keeping {len(keeping)} model(s):")
         for mid in keeping:
-            ctx = models[mid]["limit"]["context"]
-            print(f"    = {mid} (context: {ctx:,})")
+            ctx = models[mid].get("limit", {}).get("context") if models[mid].get("limit") else None
+            ctx_str = f" (context: {ctx:,})" if ctx else ""
+            print(f"    = {mid}{ctx_str}")
     if removing:
         print(f"\n  Removing {len(removing)} model(s):")
         for mid in removing:
@@ -785,6 +795,7 @@ class ModelSelectorApp(App[list[str] | None]):
         removed_other: list[str],
         default_output: int,
         api_contexts: dict[str, int] | None = None,
+        no_limits: bool = False,
     ) -> None:
         super().__init__()
         self._selections = selections
@@ -793,6 +804,7 @@ class ModelSelectorApp(App[list[str] | None]):
         self._removed_other = removed_other
         self._default_output = default_output
         self._api_contexts = api_contexts or {}
+        self._no_limits = no_limits
         # Ground truth for selection state (survives filter rebuilds)
         self._selected_ids: set[str] = {
             sel.value for sel in selections if sel.initial_state
@@ -872,11 +884,11 @@ class ModelSelectorApp(App[list[str] | None]):
         # Show config for newly added models only
         if adding:
             models = {
-                mid: build_model_config(
-                    mid, self._default_output, self._api_contexts.get(mid)
-                )
-                for mid in adding
-            }
+            mid: build_model_config(
+                mid, self._default_output, self._api_contexts.get(mid), no_limits=self._no_limits
+            )
+            for mid in adding
+        }
             lines.append("[bold green]Adding to config:[/bold green]")
             lines.append(format_models_json(models, indent=2))
 
@@ -992,6 +1004,7 @@ def interactive_select(
     config_model_ids: set[str],
     default_output: int = DEFAULT_OUTPUT_TOKENS,
     api_contexts: dict[str, int] | None = None,
+    no_limits: bool = False,
 ) -> list[str] | None:
     """Show an interactive split-pane TUI for model selection.
 
@@ -1030,6 +1043,7 @@ def interactive_select(
         gone_other,
         default_output,
         api_contexts=contexts,
+        no_limits=no_limits,
     )
     return app.run()
 
@@ -1202,6 +1216,7 @@ def main() -> None:
             config_model_ids,
             args.default_output,
             api_contexts=api_contexts,
+            no_limits=args.no_limits,
         )
         if selected is None:
             print("Cancelled.")
@@ -1297,7 +1312,8 @@ def main() -> None:
     models_config = {}
     for mid in selected:
         models_config[mid] = build_model_config(
-            mid, args.default_output, api_contexts.get(mid), api_outputs.get(mid)
+            mid, args.default_output, api_contexts.get(mid), api_outputs.get(mid),
+            no_limits=args.no_limits
         )
 
     if config_path is None:

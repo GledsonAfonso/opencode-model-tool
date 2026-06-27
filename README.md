@@ -34,6 +34,9 @@ uv run opencode-model-tool.py --endpoint https://llamaswap.your.domain/v1 --conf
 
 # Include embedding/reranker models (excluded by default)
 uv run opencode-model-tool.py --list --endpoint https://llamaswap.your.domain/v1 --include-embeddings
+
+# Skip adding context/output limits to model configs
+uv run opencode-model-tool.py --endpoint https://llamaswap.your.domain/v1 --no-limits
 ```
 
 ## Options
@@ -50,6 +53,7 @@ uv run opencode-model-tool.py --list --endpoint https://llamaswap.your.domain/v1
 | `--list`               | List available models without interactive selection                                 |
 | `--all`                | Select all models (skip interactive picker)                                         |
 | `--yes`                | Skip confirmation prompt before writing config                                      |
+| `--no-limits`          | Skip adding context/output limits to model configs                                  |
 
 ## What it does
 
@@ -90,6 +94,22 @@ The tool generates OpenCode provider model entries in this format:
             "output": 65536,
           },
         },
+      },
+    },
+  },
+}
+```
+
+If you use the `--no-limits` flag, models are added without context/output limits:
+
+```jsonc
+{
+  "provider": {
+    "llamaswap": {
+      "models": {
+        "qwen3-5-27b-ud-q6kxl-128k-coding-thinking": {
+          "name": "qwen3-5-27b-ud-q6kxl-128k-coding-thinking"
+        }
       },
     },
   },
